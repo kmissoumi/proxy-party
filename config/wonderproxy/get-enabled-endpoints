@@ -1,0 +1,38 @@
+#!/bin/bash -x
+#
+# 
+
+protoHost="https://api.wonderproxy.com"
+timeStamp=$(date +"%Y-%m-%d_%H%M%S_%s")
+scriptPath="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+quickSauceHome=$( echo "${scriptPath%/*}" )
+requestCounter=0
+
+userKey="${WONDERPROXY_TOKEN}:"
+
+
+function wonder_get {
+    curl --request GET --silent --user ${userKey} \
+      --header "Accept: application/json" ${protoHost}/${1}
+}
+
+
+function wonder_contract {
+    r=$(wonder_get "/v0/contract")
+    jq <<< "$r" > ${scriptPath}/${FUNCNAME[0]}.json
+}
+
+
+function wonder_contract_servers {
+    r=$(wonder_get "v0/contract/servers")
+    jq <<< "$r" > ${scriptPath}/${FUNCNAME[0]}.json
+    jq --raw-output '.[]|.server' <<< "$r" > ${scriptPath}/enabled-endpoints.list
+
+    jq --raw-output '.[]|.server' wonder-contract-servers.json
+}
+
+
+
+wonder_contract_servers
+
+

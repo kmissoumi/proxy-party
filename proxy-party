@@ -1,0 +1,344 @@
+#!/bin/bash
+#
+# Copyright (c) 2022, Kareem Missoumi
+# All rights reserved.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+#
+# 
+
+
+# init
+timeStampLong=$(date +"%Y-%m-%d_%H%M%S_%s")
+timeStamp=$(date +"%Y-%m-%d_%H%M%S")
+scriptPath="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+proxyPartyHome=$( echo "${scriptPath%/*}" )
+
+# default configuration
+proxyPartyPort=9001
+sauceRegion="us-west"
+protoHost="https://api.us-west-1.saucelabs.com"
+
+# base configuration
+baseDir="${scriptPath}/data/${timeStamp}"
+configDir="${scriptPath}/config"
+
+
+function pre_flight {
+  binCheckCurl=$(command -v curl)
+  binCheckJq=$(command -v jq)
+  binCheckOp=$(command -v op)
+  
+  # credentials are used by sauce connect and never read or written to file
+  [[ ( -z ${SAUCE_USERNAME} || -z ${SAUCE_ACCESS_KEY} || -z ${EMAIL} ) ]] && bail_out_env
+  [[ ( -z ${binCheckJq} ) || ( -z ${binCheckCurl} ) || ( -z ${binCheckOp} )]] && bail_out_bin
+
+  # check for existing processes
+}
+
+
+function check_port {
+  i=true
+  while ${i}
+    do
+      openFiles=$(lsof -n -i TCP:${proxyPartyPort})
+      [[ $? = 1 ]] && i=false || next_port
+    done
+}
+
+
+function list_port {
+  sudo lsof -PiTCP -sTCP:LISTEN
+}
+
+
+function log_pid {
+  printf "%s" $! >> ${sessionDir}/${1}.pid
+}
+
+
+function next_port {
+  ((proxyPartyPort++))
+}
+
+
+function session_init {
+  mkdir -p ${sessionDir}
+}
+
+
+function build_config {
+  build_pac
+  build_chuck_config
+  build_sauce_config
+}
+
+
+function build_pac {
+  proxyPacTemplate="${configDir}/pac/proxyTemplate.pac"
+  proxyPac="${sessionDir}/proxy-${tunnelName}.pac"
+
+  sed "s/localhost:port/localhost:${proxyPartyPort}/" ${proxyPacTemplate} > ${proxyPac}
+}
+
+
+function build_chuck_config {
+  chuckSessionTemplate="${configDir}/charles/newSession.chls"
+  chuckBaseName="charles-${tunnelName}"
+  chuckSession="${sessionDir}/${chuckBaseName}.chls"
+  chuckConfigTemplate="${configDir}/charles/charles.config"
+  chuckConfig="${sessionDir}/${chuckBaseName}.config"
+
+  wonderProxyPort=12000
+  wonderProxyDomain="wonderproxy.com"
+
+  cp ${chuckSessionTemplate} ${chuckSession}
+
+  sed \
+    -e "s/proxyPartyPort/${proxyPartyPort}/" \
+    -e "s/wonderProxyPort/${wonderProxyPort}/" \
+    -e "s/wonderProxyHost/${cityName}.${wonderProxyDomain}/" \
+    -e 's/charlesProxySiteLicenseUserName/'"${charlesProxySiteLicenseUserName}"'/' \
+    -e "s/charlesProxySiteLicenseKey/${charlesProxySiteLicenseKey}/" \
+    -e 's/wonderProxyEncryptedToken/'"${wonderProxyEncryptedToken}"'/g' \
+    -e "s/wonderProxyUserName/${wonderProxyUserName}/g" \
+    ${chuckConfigTemplate} > ${chuckConfig}
+
+  next_port
+}
+
+
+function build_sauce_config {
+  sauceConfigTemplate="${configDir}/sauce/sauceBaseConfig.yml"
+  sauceBaseName="sauce-connect-${tunnelName}"
+  sauceConfig="${sessionDir}/${sauceBaseName}.yml"
+  saucePidFile="${logDir}/${sauceBaseName}.pid"
+  sauceReadyFile="${logDir}/${sauceBaseName}.ready"
+
+  sed \
+    -e "s/<sauceRegion>/${sauceRegion}/" \
+    -e "s/<tunnelName>/${tunnelName}/" \
+    ${sauceConfigTemplate} > ${sauceConfig}
+
+  printf "\n%s%s" "pidfile: " ${saucePidFile} >> ${sauceConfig}
+  printf "\n%s%s" "readyFile: " ${sauceReadyFile} >> ${sauceConfig}
+  printf "\n%s%s" "pac: file://" ${proxyPac} >> ${sauceConfig}
+ 
+}
+
+
+function off_blast {
+  start_sauce
+  start_chuck
+  sleep 2
+}
+
+
+function start_sauce {
+  sauceBaseName="sauce-connect-${tunnelName}"
+  sauceConfig="${sessionDir}/${sauceBaseName}.yml"
+  sauceLog="${logDir}/${sauceBaseName}.log"
+
+  printf "INFO: Starting Sauce Connect Proxy.\n"
+  sc --config-file ${sauceConfig} > ${sauceLog} 2>&1 &
+  log_pid sc-${tunnelName}
+}
+
+
+function start_chuck {
+  chuckPath="/Applications/Charles.app/Contents/MacOS"
+
+  chuckBaseName="charles-${tunnelName}"
+  chuckConfig="${sessionDir}/${chuckBaseName}.config"
+  chuckSession="${sessionDir}/${chuckBaseName}.chls"
+  chuckLog="${logDir}/${chuckBaseName}.log"
+
+  # add option to run -headless
+  ${chuckPath}/Charles -config ${chuckConfig} ${chuckSession} > ${chuckLog} 2>&1 &
+  log_pid charles-${tunnelName}
+
+  # check chuck chore
+  check_chuck "Ready"
+  
+  # throttle network
+  port=$(xsltproc --novalid --nonet ${configDir}/charles/getPort.xsl ${chuckConfig})
+  throttle_chuck ${port} 
+}
+
+
+function check_chuck {
+  key=${1}
+
+  chuckBaseName="charles-${tunnelName}"
+  chuckLog="${logDir}/${chuckBaseName}.log"
+
+  check_log ${key} ${chuckLog}
+}
+
+
+function check_log {
+  key=${1}
+  logFile=${2}
+
+  i=true
+
+  # timing issue when running charles in headless mode
+  # either case need to parse the XML response
+  # logs should already exist
+
+  c=0     # c is for counter
+  r=10    # r is for retries
+  t=2     # t is the interval in seconds between retries
+
+  while ${i}
+    do
+      # only print INFO when counter is even
+      [[ $((c%2)) -eq 0 ]] && check_in ${1}
+      grep ${key} ${logFile} 2>&1 > /dev/null
+      [[ $? = 0 ]] && i=false || sleep $t
+      [[ $c -ge $r ]] && timeout || ((c++))
+    done
+}
+
+
+function timeout {
+  printf "WARN: Charles did not respond in time!\n"
+  printf "EXIT: Increase retry window and try again.\n\n"
+  party_pooper
+  exit 3
+}
+
+
+function check_in {
+  printf "INFO: Waiting for **%s** response from Charles.\n" ${1}
+}
+
+
+function throttle_chuck {
+  port=${1}
+
+  # network presets
+  dialup="56+kbps+Modem"
+  isdn="256+kbps+ISDN%2FDSL"
+  adsl="2+Mbps+ADSL"
+  adsl2="8+Mbps+ADSL2"
+  vdsl="32+Mbps+VDSL"
+  fibre="32+Mbps+Fibre"
+  mobile="4G"
+
+  printf "INFO: Set network type to **%s**.\n" ${networkType}
+
+  proxyHost="http://localhost:${port}"
+  protoHost="http://control.charles"
+  # use the key name to reference the preset value
+  responseThrottle=$(curl --silent --proxy ${proxyHost} "${protoHost}/throttling/activate?preset=${!networkType}")
+  printf "%s" ${responseThrottle} > ${sessionDir}/charles-${tunnelName}-responseThrottle.xml
+  check_chuck "Throttling"
+  sleep 2
+
+  responseRecord=$(curl --silent --proxy ${proxyHost} "${protoHost}/recording/start")
+  printf "%s" ${responseRecord}  > ${sessionDir}/charles-${tunnelName}-responseRecord.xml
+  check_chuck "Recording"
+}
+
+
+function post_flight {
+  # check health
+  # check connectivity
+  printf "INFO: Everything is (probably) AOK!.\n"
+  printf "INFO: Use pkill command to stop all processes.\n"
+  printf "pkill -x Charles sc"
+  printf "\n\n"
+  exit 0
+}
+
+
+function logger {
+  printf "ERROR: %s .\n" "${1}"
+}
+
+
+function bail_out_bin {
+  message="Missing binary files. Please review install command listed below."
+  suggestion="brew install sauce-connect charles jq 1password-cli"
+
+  logger "${message}"
+  logger "${suggestion}"
+  printf "\n"
+  exit 127
+}
+  
+
+function bail_out_env {
+  message="Missing environment variables. Please set!"
+  envList="SAUCE_USERNAME SAUCE_ACCESS_KEY EMAIL"
+
+  logger "${message}"
+
+  for i in ${envList}
+  do
+    e=$(printf "%s:%s" ${i} ${!i})
+    logger "${e}"
+  done
+  printf "\n"
+  exit 128
+}
+
+
+function get_credentials {
+  # will need to source .credentials until 1Password integration is complete.
+  printf "INFO: Getting credentials from 1Password."
+}
+
+
+function party_pooper {
+  # you don't have to go home...but you can't stay here
+  pkill -x Charles sc
+
+  sleep 1
+  # pgrep and check that cleanup actually happened
+  pgrep -x Charles sc
+}
+
+
+function session_converter {
+  # charles session to HAR file
+  chuckPath="/Applications/Charles.app/Contents/MacOS"
+  alias chuck="${chuckPath}/Charles"
+
+  for fq in data/*/*.chls
+  do
+    d=$(dirname  -- ${fq})
+    f=$(basename -- ${fq})
+    ext="${f##*.}"
+    f="${f%.*}"
+    chuck convert ${fq} ${d}/${f}.har
+  done
+}
+
+
+# are we having fun yet!?
+pre_flight
+printf "INFO: Base configuration directory.\nINFO: %s\n" ${baseDir}
+
+for r in "$@"s
+do
+  # check_inputs
+  cityName=${r%-*}
+  networkType=${r#*-}
+  tunnelName="${cityName}-${networkType}" 
+
+  sessionDir=${baseDir}/${tunnelName} && logDir="${sessionDir}"
+  session_init
+  printf "INFO: Building configuration for **%s**.\n" ${cityName}
+  check_port
+  build_config
+  off_blast
+done
+
+
+post_flight
+
+
+exit 1
