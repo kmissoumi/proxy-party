@@ -7,9 +7,16 @@ Sauce Connect Forward Proxy, Network Simulation, and Localization (for the disce
 
 ## Notes
 
-- Do **NOT** distribute to customers.
-  - Access to the SE 1Password vault is required to retrieve encrypted credentials to access WonderProxy and the Charles proxy site license.
-- There is NO *support*.
+- Do **NOT** distribute to customers!
+- Access to the SE 1Password vault ~~is required~~ will eventually be required.
+  - One-time CLi configuration requires your [_Secret Key_][51].
+  - An access token is used to retrieve Proxy Party credentials.
+    - Token TTL is 30m.
+  - The SE vault stores the following secrets.
+    - An encrypted access token for WonderProxy.
+    - A site license for CharlesProxy.
+
+- There is **NO** support but what we make for ourselves.
   - No stockade.
   - No guard tower.
   - No electronic frontier.
@@ -19,19 +26,24 @@ Sauce Connect Forward Proxy, Network Simulation, and Localization (for the disce
   - This is the list of enabled WonderProxy endpoints.
   - Ask the WonderProxy account admin to add additional endpoints.
 - [List of Network Types][71].
-  - These are the Charles proxy baked-in presets.
+  - These are the CharlesProxy baked-in presets.
 
-## Usage
+### Usage
 
 `./proxy-party <cityName>-<networkType> <cityName>-<networkType> ...`
 
 
 
-## Quick Start
+
+### Quick Start
 
 ```shell
 # install dependencies
  brew install sauce-connect charles jq 1password-cli
+
+# setup cli for 1password
+
+
 
 # build configuration & start services
 ./proxy-party tokyo-fibre london-mobile istanbul-adsl2
@@ -42,11 +54,14 @@ pkill -x Charles sc
 
 </br>
 
-### References & Guides
 
-[CharlesProxy][30] guide for Sauce Labs.  
-[WonderProxy][31]
-guide for Sauce Labs.
+### Sauce Labs Integration Guides
+
+[CharlesProxy][30]  
+[WonderProxy][31]  
+
+
+### References
 
 [Sauce Connect Proxy Authentication][20]  
 [Sauce Connect CLI Reference][21]  
@@ -73,6 +88,7 @@ guide for Sauce Labs.
 
 
 [50]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Proxy_servers_and_tunneling/Proxy_Auto-Configuration_PAC_file
+[51]: https://support.1password.com/secret-key/
 
 
 [70]: config/wonderproxy/enabled-endpoints.list
