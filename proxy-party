@@ -26,17 +26,91 @@ configDir="${scriptPath}/config"
 
 
 function pre_flight {
-  binCheckCurl=$(command -v curl)
-  binCheckJq=$(command -v jq)
-  binCheckOp=$(command -v op)
-  
-  # credentials are used by sauce connect and never read or written to file
-  [[ ( -z ${SAUCE_USERNAME} || -z ${SAUCE_ACCESS_KEY} || -z ${EMAIL} ) ]] && bail_out_env
-  [[ ( -z ${binCheckJq} ) || ( -z ${binCheckCurl} ) || ( -z ${binCheckOp} )]] && bail_out_bin
-
+  load_credentials
+  check_bin
+  check_env
   # check for existing processes
 }
 
+
+function logger {
+  printf "ERROR: %s\n" "${1}"
+}
+
+
+function check_bin {
+  # brew install sauce-connect charles jq 1password-cli
+  chuckPath="/Applications/Charles.app/Contents/MacOS"
+  ln -s "${chuckPath}/Charles" chuck
+
+  binList="curl
+    jq
+    op
+    sc
+    ./chuck"
+  
+  curl="curl"
+  jq="jq"
+  op="1password-cli"
+  sc="sauce-connect"
+  chuck="charles"
+
+  missing=""
+
+  for b in ${binList}
+  do
+    [[ -z $(command -v ${b}) ]] && missing+="${!b} "
+  done
+
+  if [ -n "${missing}" ]
+  then
+    logger "Missing binary. Please review install command listed below."
+    logger "brew install ${missing}"
+    printf "\n"
+    exit 127
+  fi
+}
+  
+
+function check_env {
+  # sauce credentials are used by sauce connect and never read or written to file
+  envList="SAUCE_USERNAME
+    SAUCE_ACCESS_KEY
+    EMAIL
+    wonderProxyEncryptedToken
+    charlesProxySiteLicenseUserName
+    charlesProxySiteLicenseKey
+    wonderProxyEncryptedToken
+    wonderProxyUserName"
+
+  for e in ${envList}
+  do
+    [[ -z ${!e} ]] && missing+="${e} "
+  done
+
+  if [ -n "${missing}" ]
+  then
+    logger "Missing environment variable(s). Please set!"
+    logger "${missing}"
+    printf "\n"
+    exit 128
+  fi
+
+}
+
+
+function load_credentials {
+  f="${HOME}/.config/op/.proxypartyrc"
+  [[ -f "${f}" ]] && source ${f} || pull_credentials ${f}
+}
+
+
+function pull_credentials {
+  # Item ProxyParty SE Vault by UUID 
+  op get item "zaeactx3yfakzgt5iynxyqq7vi" \
+   |jq -r '.details.sections[1].fields[]|"export " + .t + "=" + .v' > ${1}
+  load_credentials
+}
 
 function check_port {
   i=true
@@ -185,7 +259,6 @@ function check_log {
 
   # timing issue when running charles in headless mode
   # either case need to parse the XML response
-  # logs should already exist
 
   c=0     # c is for counter
   r=10    # r is for retries
@@ -196,7 +269,9 @@ function check_log {
       # only print INFO when counter is even
       [[ $((c%2)) -eq 0 ]] && check_in ${1}
       grep ${key} ${logFile} 2>&1 > /dev/null
+      # exit loop if we match
       [[ $? = 0 ]] && i=false || sleep $t
+      # cleanup and exit to shell if we exceed retry value
       [[ $c -ge $r ]] && timeout || ((c++))
     done
 }
@@ -229,8 +304,12 @@ function throttle_chuck {
 
   printf "INFO: Set network type to **%s**.\n" ${networkType}
 
+  # the management interface of every Charles Proxy instance is accessed via the proxy itself.
   proxyHost="http://localhost:${port}"
+
+  # the actual management address which is resolvable via proxy.
   protoHost="http://control.charles"
+  
   # use the key name to reference the preset value
   responseThrottle=$(curl --silent --proxy ${proxyHost} "${protoHost}/throttling/activate?preset=${!networkType}")
   printf "%s" ${responseThrottle} > ${sessionDir}/charles-${tunnelName}-responseThrottle.xml
@@ -254,40 +333,10 @@ function post_flight {
 }
 
 
-function logger {
-  printf "ERROR: %s .\n" "${1}"
-}
-
-
-function bail_out_bin {
-  message="Missing binary files. Please review install command listed below."
-  suggestion="brew install sauce-connect charles jq 1password-cli"
-
-  logger "${message}"
-  logger "${suggestion}"
-  printf "\n"
-  exit 127
-}
-  
-
-function bail_out_env {
-  message="Missing environment variables. Please set!"
-  envList="SAUCE_USERNAME SAUCE_ACCESS_KEY EMAIL"
-
-  logger "${message}"
-
-  for i in ${envList}
-  do
-    e=$(printf "%s:%s" ${i} ${!i})
-    logger "${e}"
-  done
-  printf "\n"
-  exit 128
-}
 
 
 function get_credentials {
-  # will need to source .credentials until 1Password integration is complete.
+  # will need to source .credentials until 1Password integration is complete
   printf "INFO: Getting credentials from 1Password."
 }
 
@@ -295,9 +344,9 @@ function get_credentials {
 function party_pooper {
   # you don't have to go home...but you can't stay here
   pkill -x Charles sc
-
   sleep 1
-  # pgrep and check that cleanup actually happened
+  
+  # check that cleanup actually happened, until then, print to standard out
   pgrep -x Charles sc
 }
 
@@ -322,7 +371,7 @@ function session_converter {
 pre_flight
 printf "INFO: Base configuration directory.\nINFO: %s\n" ${baseDir}
 
-for r in "$@"s
+for r in "$@"
 do
   # check_inputs
   cityName=${r%-*}

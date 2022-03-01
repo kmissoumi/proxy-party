@@ -8,13 +8,12 @@ Sauce Connect Forward Proxy, Network Simulation, and Localization (for the disce
 ## Notes
 
 - Do **NOT** distribute to customers!
-- Access to the SE 1Password vault ~~is required~~ will eventually be required.
-  - One-time CLi configuration requires your [_Secret Key_][51].
-  - An access token is used to retrieve Proxy Party credentials.
-    - Token TTL is 30m.
+- Access to the SE 1Password vault is required.
+  - One-time CLI configuration requires your [_Secret Key_][51].
   - The SE vault stores the following secrets.
     - An encrypted access token for WonderProxy.
     - A site license for CharlesProxy.
+  - Credentials and licenses are cached locally.
 
 - There is **NO** support but what we make for ourselves.
   - No stockade.
@@ -42,8 +41,7 @@ Sauce Connect Forward Proxy, Network Simulation, and Localization (for the disce
  brew install sauce-connect charles jq 1password-cli
 
 # setup cli for 1password
-
-
+OP_SESSION_saucelabs=$(op signin --raw saucelabs.1password.com ${EMAIL})
 
 # build configuration & start services
 ./proxy-party tokyo-fibre london-mobile istanbul-adsl2
