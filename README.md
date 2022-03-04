@@ -1,8 +1,7 @@
 
 # Proxy Party
 
-Sauce Connect Forward Proxy, Network Simulation, and Localization (for the discerning SE dot com).
-
+One-Click MultiProxy Setup for Sauce Connect Forward Proxy w/ Localization & Network Simulation.
 
 
 ## Notes
@@ -30,6 +29,14 @@ Sauce Connect Forward Proxy, Network Simulation, and Localization (for the disce
 ### Usage
 
 `./proxy-party <cityName>-<networkType> <cityName>-<networkType> ...`
+
+
+#### Extended Usage
+> Generate configuration and exit by setting mode to `dry-run`.  
+> `export PARTY_MODE="dry-run"  
+> 
+> Unset to return to default run mode.  
+> `unset PARTY_MODE`
 
 
 

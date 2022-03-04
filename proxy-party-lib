@@ -1,0 +1,65 @@
+function loggy {
+  printf "%5s: %s\n" "${1}" "${2}"
+}
+
+
+function log_error {
+  loggy "ERROR" "${1}"
+}
+
+
+function log_info {
+  loggy "INFO" "${1}"
+}
+
+
+function log_warn {
+  loggy "WARN" "${1}"
+}
+
+
+function log_debug {
+  [[ ${PARTY_DEBUG} ]] && loggy "DEBUG" ${1}
+}
+
+
+function log_cmd {
+  printf "\t %s\n" "${1}"
+}
+
+
+function party-converter {
+  # charles session to HAR file
+  log_info "Party converter is starting."
+
+  for fq in data/*/*/*.chls
+  do
+    d=$(dirname  -- ${fq})
+    f=$(basename -- ${fq})
+    ext="${f##*.}"
+    f="${f%.*}"
+    har="${d}/${f}.har"
+    [[ -f ${har} ]] && log_warn "Existing HAR file found. Skipping ${fq}" || run-party-converter ${fq} ${har}
+  done
+  log_info "Party converter has finished."
+}
+
+
+function run-party-converter {
+  source=${1}
+  target=${2}
+  log_info "Converting CharlesProxy session to HTTP archive format (HAR). ${source}"
+  /Applications/Charles.app/Contents/MacOS/Charles convert ${source} ${target}
+}
+
+
+function party-pooper {
+  # you don't have to go home...but you can't stay here
+  log_warn "Stopping all Charles Proxy and Sauce Connect processes."
+  
+  while [[ $(pkill -x Charles sc) ]]
+  do
+    sleep 2
+  done
+  log_info "Party clean up is complete."
+}

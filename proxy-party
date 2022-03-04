@@ -26,34 +26,39 @@ configDir="${scriptPath}/config"
 
 
 function pre_flight {
+  log_info "Starting Proxy Party!"
+  party_mode
+  load_lib
   load_credentials
+  log_debug "Credentials loaded OK."
   check_bin
   check_env
-  # check for existing processes
+  log_info "Base configuration directory." && log_cmd "${baseDir}"
+  log_info "Pre-flight check list completed OK."
 }
 
 
-function logger {
-  printf "ERROR: %s\n" "${1}"
+function party_mode {
+  [[ ${PARTY_MODE} == "dry-run" ]] && PARTY_MODE=true || return
+
+  log_warn "Starting dry run."
+  log_debug "Proxy Party will run pre-flight checks, generate configuration, and exit."
 }
 
 
 function check_bin {
-  # brew install sauce-connect charles jq 1password-cli
-  chuckPath="/Applications/Charles.app/Contents/MacOS"
-  ln -s "${chuckPath}/Charles" chuck
+  log_info "Check binary dependencies."
+  #alias ch='/Applications/Charles.app/Contents/MacOS/Charles'
 
   binList="curl
     jq
     op
-    sc
-    ./chuck"
+    sc"
   
   curl="curl"
   jq="jq"
   op="1password-cli"
   sc="sauce-connect"
-  chuck="charles"
 
   missing=""
 
@@ -62,18 +67,20 @@ function check_bin {
     [[ -z $(command -v ${b}) ]] && missing+="${!b} "
   done
 
+ [[ -z $(command -v /Applications/Charles.app/Contents/MacOS/Charles) ]] && missing+="charles "
+
   if [ -n "${missing}" ]
   then
-    logger "Missing binary. Please review install command listed below."
-    logger "brew install ${missing}"
-    printf "\n"
+    log_error "Exiting NOTOK. Missing binary. Please review install command below."
+    log_cmd "brew install ${missing}"
     exit 127
   fi
 }
-  
+
 
 function check_env {
   # sauce credentials are used by sauce connect and never read or written to file
+  log_info "Check environment configuration."
   envList="SAUCE_USERNAME
     SAUCE_ACCESS_KEY
     EMAIL
@@ -83,6 +90,7 @@ function check_env {
     wonderProxyEncryptedToken
     wonderProxyUserName"
 
+
   for e in ${envList}
   do
     [[ -z ${!e} ]] && missing+="${e} "
@@ -90,27 +98,76 @@ function check_env {
 
   if [ -n "${missing}" ]
   then
-    logger "Missing environment variable(s). Please set!"
-    logger "${missing}"
-    printf "\n"
+    log_error "Exiting NOTOK. Missing environment variable(s). Please set!"
+    log_cmd "${missing}"
     exit 128
   fi
 
 }
 
 
+function load_lib {
+  f="${scriptPath}/proxy-party-lib"
+  [[ -f "${f}" ]] && source ${f}
+}
+
+
 function load_credentials {
+  log_info "Load secrets from cache."
+  c="${HOME}/.config/op/config"
   f="${HOME}/.config/op/.proxypartyrc"
-  [[ -f "${f}" ]] && source ${f} || pull_credentials ${f}
+
+  # check for op config
+  [[ -f "${c}" ]] && [[ -s "${c}" ]] || init_credentials 
+  log_debug "${FUNCNAME[0]} ${OP_SESSION_saucelabs}"
+
+  [[ -f "${f}" ]] && [[ -s "${f}" ]] && source ${f} || pull_credentials ${f} 
+}
+
+
+function debug_source_credentials {
+  c="${HOME}/.config/op/config"
+  f="${HOME}/.config/op/.proxypartyrc"
+
+  log_info "Loading secrets from cache."
+  [[ -f "${c}" ]] && [[ -s "${c}" ]] || init_credentials
+  [[ -f "${f}" ]] && [[ -s "${f}" ]] && source ${f} || pull_credentials ${f}
+}
+
+
+function debug_check_c2 {
+  printf "%s: %s" ${FUNCNAME[0]} ${OP_SESSION_saucelabs}
+}
+
+
+function init_credentials {
+  log_warn "1Password CLI configuration does not exist."
+  log_info "Entering interactive prompt to setup 1Password CLI configuration."
+  export OP_SESSION_saucelabs=$(op signin --raw saucelabs.1password.com ${EMAIL})
+  log_debug "${FUNCNAME[0]} ${OP_SESSION_saucelabs}"
+  load_credentials
 }
 
 
 function pull_credentials {
-  # Item ProxyParty SE Vault by UUID 
-  op get item "zaeactx3yfakzgt5iynxyqq7vi" \
-   |jq -r '.details.sections[1].fields[]|"export " + .t + "=" + .v' > ${1}
+  # using the ProxyParty item UUID to retrieve secrets from the SE shared vault
+  f="${HOME}/.config/op/.proxypartyrc"
+  proxyPartyVaultUUID="zaeactx3yfakzgt5iynxyqq7vi"
+  [[ -z ${OP_SESSION_saucelabs} ]] && auth_credentials
+  op get item "${proxyPartyVaultUUID}" \
+   |jq -r '.details.sections[1].fields[]|"export " + .t + "=" + .v' > ${f}
   load_credentials
 }
+
+
+function auth_credentials {
+
+    log_warn "1Password CLI token does not exist."
+    log_info "Entering interactive prompt to refresh 1Password CLI token."
+    export OP_SESSION_saucelabs=$(op signin --raw saucelabs)
+
+}
+
 
 function check_port {
   i=true
@@ -143,6 +200,8 @@ function session_init {
 
 
 function build_config {
+  log_info "Building configuration for **${cityName}**."
+  check_port
   build_pac
   build_chuck_config
   build_sauce_config
@@ -205,7 +264,7 @@ function build_sauce_config {
 function off_blast {
   start_sauce
   start_chuck
-  sleep 2
+  sleep 1
 }
 
 
@@ -214,23 +273,23 @@ function start_sauce {
   sauceConfig="${sessionDir}/${sauceBaseName}.yml"
   sauceLog="${logDir}/${sauceBaseName}.log"
 
-  printf "INFO: Starting Sauce Connect Proxy.\n"
+  log_info "Starting Sauce Connect Proxy."
   sc --config-file ${sauceConfig} > ${sauceLog} 2>&1 &
   log_pid sc-${tunnelName}
 }
 
 
 function start_chuck {
-  chuckPath="/Applications/Charles.app/Contents/MacOS"
-
+  alias ch='/Applications/Charles.app/Contents/MacOS/Charles'
   chuckBaseName="charles-${tunnelName}"
   chuckConfig="${sessionDir}/${chuckBaseName}.config"
   chuckSession="${sessionDir}/${chuckBaseName}.chls"
   chuckLog="${logDir}/${chuckBaseName}.log"
 
   # add option to run -headless
-  ${chuckPath}/Charles -config ${chuckConfig} ${chuckSession} > ${chuckLog} 2>&1 &
+  /Applications/Charles.app/Contents/MacOS/Charles -config ${chuckConfig} ${chuckSession} > ${chuckLog} 2>&1 &
   log_pid charles-${tunnelName}
+
 
   # check chuck chore
   check_chuck "Ready"
@@ -246,7 +305,7 @@ function check_chuck {
 
   chuckBaseName="charles-${tunnelName}"
   chuckLog="${logDir}/${chuckBaseName}.log"
-
+ 
   check_log ${key} ${chuckLog}
 }
 
@@ -278,15 +337,15 @@ function check_log {
 
 
 function timeout {
-  printf "WARN: Charles did not respond in time!\n"
-  printf "EXIT: Increase retry window and try again.\n\n"
-  party_pooper
+  log_warn "Charles did not respond in time!"
+  log_error "Exiting NOTOK. Increase retry window and try again."
+  party-pooper
   exit 3
 }
 
 
 function check_in {
-  printf "INFO: Waiting for **%s** response from Charles.\n" ${1}
+  log_info "Waiting for **${1}** response from Charles."
 }
 
 
@@ -302,7 +361,7 @@ function throttle_chuck {
   fibre="32+Mbps+Fibre"
   mobile="4G"
 
-  printf "INFO: Set network type to **%s**.\n" ${networkType}
+  log_info "Set network type to **${networkType}**."
 
   # the management interface of every Charles Proxy instance is accessed via the proxy itself.
   proxyHost="http://localhost:${port}"
@@ -325,69 +384,30 @@ function throttle_chuck {
 function post_flight {
   # check health
   # check connectivity
-  printf "INFO: Everything is (probably) AOK!.\n"
-  printf "INFO: Use pkill command to stop all processes.\n"
-  printf "pkill -x Charles sc"
-  printf "\n\n"
+  log_info "Everything is (probably) AOK!"
+  log_info "Use the party-pooper command to stop all processes."
+  log_cmd "source ${scriptPath}/proxy-party-lib"
+  log_cmd "party-pooper"
+  log_info "Exiting OK"
   exit 0
-}
-
-
-
-
-function get_credentials {
-  # will need to source .credentials until 1Password integration is complete
-  printf "INFO: Getting credentials from 1Password."
-}
-
-
-function party_pooper {
-  # you don't have to go home...but you can't stay here
-  pkill -x Charles sc
-  sleep 1
-  
-  # check that cleanup actually happened, until then, print to standard out
-  pgrep -x Charles sc
-}
-
-
-function session_converter {
-  # charles session to HAR file
-  chuckPath="/Applications/Charles.app/Contents/MacOS"
-  alias chuck="${chuckPath}/Charles"
-
-  for fq in data/*/*.chls
-  do
-    d=$(dirname  -- ${fq})
-    f=$(basename -- ${fq})
-    ext="${f##*.}"
-    f="${f%.*}"
-    chuck convert ${fq} ${d}/${f}.har
-  done
 }
 
 
 # are we having fun yet!?
 pre_flight
-printf "INFO: Base configuration directory.\nINFO: %s\n" ${baseDir}
 
 for r in "$@"
 do
-  # check_inputs
   cityName=${r%-*}
   networkType=${r#*-}
   tunnelName="${cityName}-${networkType}" 
-
   sessionDir=${baseDir}/${tunnelName} && logDir="${sessionDir}"
+
   session_init
-  printf "INFO: Building configuration for **%s**.\n" ${cityName}
-  check_port
   build_config
-  off_blast
+  [[ ${PARTY_MODE} ]] || off_blast
 done
 
+[[ ${PARTY_MODE} ]] && (log_info "Exiting dry run OK" && exit 0) || post_flight
 
-post_flight
-
-
-exit 1
+exit 4
