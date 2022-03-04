@@ -32,9 +32,10 @@ One-Click MultiProxy Setup for Sauce Connect Forward Proxy w/ Localization & Net
 
 
 #### Extended Usage
+
 > Generate configuration and exit by setting mode to `dry-run`.  
-> `export PARTY_MODE="dry-run"  
-> 
+> `export PARTY_MODE="dry-run"`
+>
 > Unset to return to default run mode.  
 > `unset PARTY_MODE`
 
@@ -47,14 +48,11 @@ One-Click MultiProxy Setup for Sauce Connect Forward Proxy w/ Localization & Net
 # install dependencies
  brew install sauce-connect charles jq 1password-cli
 
-# setup cli for 1password
-OP_SESSION_saucelabs=$(op signin --raw saucelabs.1password.com ${EMAIL})
+# setup 1password 
+export OP_SESSION_saucelabs=$(op signin --raw saucelabs.1password.com ${EMAIL})
 
 # build configuration & start services
 ./proxy-party tokyo-fibre london-mobile istanbul-adsl2
-
-# stop everything
-pkill -x Charles sc
 ```
 
 </br>
